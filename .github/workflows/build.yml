@@ -79,6 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.VIBRATE" />
               <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-feature android:name="android.hardware.usb.host" android:required="false" />
               <application
                   android:label="Vibe Controller"
                   android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
@@ -97,10 +98,22 @@ jobs:
           cat > app/src/main/java/com/gta/vibe/MainActivity.kt <<'EOF_FILE'
           package com.gta.vibe
 
+          import android.annotation.SuppressLint
           import android.app.Activity
+          import android.app.PendingIntent
+          import android.content.Context
+          import android.content.Intent
+          import android.hardware.usb.UsbConstants
+          import android.hardware.usb.UsbDevice
+          import android.hardware.usb.UsbDeviceConnection
+          import android.hardware.usb.UsbEndpoint
+          import android.hardware.usb.UsbInterface
+          import android.hardware.usb.UsbManager
           import android.os.Build
           import android.os.Bundle
           import android.os.CombinedVibration
+          import android.os.Handler
+          import android.os.Looper
           import android.os.VibrationEffect
           import android.view.InputDevice
           import android.view.WindowManager
@@ -109,10 +122,42 @@ jobs:
           import android.webkit.WebView
           import android.webkit.WebViewClient
 
+          private const val DIAG_JS = """
+          (function(){
+            if(document.getElementById('nativeDiag')) return;
+            var d=document.createElement('pre');
+            d.id='nativeDiag';
+            d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:99999;margin:0;padding:6px;font:10px monospace;background:rgba(0,0,0,.88);color:#9f9;white-space:pre-wrap;max-height:40vh;overflow:auto;';
+            d.onclick=function(){d.style.display='none';};
+            document.body.appendChild(d);
+            setInterval(function(){ try{ d.textContent=AndroidRumble.info(); }catch(e){ d.textContent='bridge error'; } },1000);
+          })();
+          """
+
           class MainActivity : Activity() {
 
               private lateinit var web: WebView
+              private val main = Handler(Looper.getMainLooper())
+              private val actionUsb = "com.gta.vibe.USB_PERMISSION"
+              private val asked = HashSet<String>()
 
+              @Volatile private var usbConn: UsbDeviceConnection? = null
+              private var usbOut: UsbEndpoint? = null
+              private var usbIface: UsbInterface? = null
+              private var usbMode = 0
+              private var usbName = ""
+              private var xoneSeq = 1
+
+              private val stopUsb = Runnable { sendUsb(0, 0) }
+
+              private val ticker = object : Runnable {
+                  override fun run() {
+                      try { scanUsb() } catch (e: Exception) { }
+                      main.postDelayed(this, 2000)
+                  }
+              }
+
+              @SuppressLint("SetJavaScriptEnabled")
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -122,9 +167,24 @@ jobs:
                   web.settings.domStorageEnabled = true
                   web.settings.allowFileAccess = true
                   web.webChromeClient = WebChromeClient()
-                  web.webViewClient = WebViewClient()
+                  web.webViewClient = object : WebViewClient() {
+                      override fun onPageFinished(view: WebView?, url: String?) {
+                          view?.evaluateJavascript(DIAG_JS, null)
+                      }
+                  }
                   web.addJavascriptInterface(Bridge(), "AndroidRumble")
                   web.loadUrl("file:///android_asset/index.html")
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  main.post(ticker)
+              }
+
+              override fun onPause() {
+                  super.onPause()
+                  main.removeCallbacks(ticker)
+                  sendUsb(0, 0)
               }
 
               @Deprecated("Deprecated in Java")
@@ -132,76 +192,225 @@ jobs:
                   if (web.canGoBack()) web.goBack() else super.onBackPressed()
               }
 
-              inner class Bridge {
+              // ───────────── helpers ─────────────
 
-                  private fun hasVib(d: InputDevice): Boolean {
-                      return if (Build.VERSION.SDK_INT >= 31) {
-                          d.vibratorManager.vibratorIds.isNotEmpty()
+              private fun amp(v: Double): Int {
+                  val a = Math.round(v * 255.0).toInt()
+                  return if (a < 1) 0 else if (a > 255) 255 else a
+              }
+
+              // ───────────── ROUTE 1: Android input-device motors ─────────────
+
+              private fun motorIds(d: InputDevice): IntArray {
+                  return if (Build.VERSION.SDK_INT >= 31) {
+                      d.vibratorManager.vibratorIds
+                  } else {
+                      if (d.vibrator.hasVibrator()) intArrayOf(0) else IntArray(0)
+                  }
+              }
+
+              private fun findPad(): InputDevice? {
+                  var best: InputDevice? = null
+                  var bestScore = Int.MIN_VALUE
+                  for (id in InputDevice.getDeviceIds()) {
+                      val d = InputDevice.getDevice(id) ?: continue
+                      val n = d.name.lowercase()
+                      val src = d.sources
+                      val padLike = (src and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
+                              (src and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK ||
+                              n.contains("xbox") || n.contains("controller") || n.contains("gamepad") || n.contains("joystick")
+                      if (!padLike) continue
+                      if (n.contains("fortsense") || n.contains("uinput")) continue
+                      val ok = try { motorIds(d).isNotEmpty() } catch (e: Exception) { false }
+                      if (!ok) continue
+                      var sc = 0
+                      if (n.contains("xbox") || n.contains("xinput") || n.contains("wireless controller")) sc += 50
+                      if (sc > bestScore) { bestScore = sc; best = d }
+                  }
+                  return best
+              }
+
+              private fun playInput(d: InputDevice, s: Int, w: Int, dur: Long) {
+                  try {
+                      if (Build.VERSION.SDK_INT >= 31) {
+                          val vm = d.vibratorManager
+                          val ids = vm.vibratorIds
+                          if (s == 0 && w == 0) { vm.cancel(); return }
+                          if (ids.size >= 2) {
+                              val b = CombinedVibration.startParallel()
+                              if (s > 0) b.addVibrator(ids[0], VibrationEffect.createOneShot(dur, s))
+                              if (w > 0) b.addVibrator(ids[1], VibrationEffect.createOneShot(dur, w))
+                              vm.vibrate(b.combine())
+                          } else {
+                              val m = if (s > w) s else w
+                              vm.vibrate(CombinedVibration.createParallel(VibrationEffect.createOneShot(dur, m)))
+                          }
                       } else {
-                          d.vibrator.hasVibrator()
+                          val m = if (s > w) s else w
+                          if (m == 0) { d.vibrator.cancel(); return }
+                          d.vibrator.vibrate(VibrationEffect.createOneShot(dur, m))
                       }
-                  }
+                  } catch (e: Exception) { }
+              }
 
-                  private fun findPad(): InputDevice? {
-                      var best: InputDevice? = null
-                      var bestScore = Int.MIN_VALUE
-                      for (id in InputDevice.getDeviceIds()) {
-                          val d = InputDevice.getDevice(id) ?: continue
-                          val src = d.sources
-                          val isPad = (src and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
-                                  (src and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
-                          if (!isPad) continue
-                          if (!hasVib(d)) continue
-                          var sc = 0
-                          val n = d.name.lowercase()
-                          if (n.contains("uinput") || n.contains("fortsense")) sc -= 100
-                          if (n.contains("xbox") || n.contains("xinput") || n.contains("wireless controller")) sc += 50
-                          if (sc > bestScore) { bestScore = sc; best = d }
+              // ───────────── ROUTE 2: raw USB XInput rumble (OTG cable / 2.4GHz dongle) ─────────────
+
+              private fun isCtl(itf: UsbInterface, kind: Int): Boolean {
+                  if (itf.interfaceClass != 255) return false
+                  return if (kind == 1) itf.interfaceSubclass == 93 && itf.interfaceProtocol == 1
+                  else itf.interfaceSubclass == 71 && itf.interfaceProtocol == 208
+              }
+
+              private fun usbKind(dev: UsbDevice): Int {
+                  for (i in 0 until dev.interfaceCount) {
+                      val itf = dev.getInterface(i)
+                      if (isCtl(itf, 1)) return 1
+                      if (isCtl(itf, 2)) return 2
+                  }
+                  return 0
+              }
+
+              @Synchronized
+              private fun closeUsb() {
+                  try {
+                      val c = usbConn
+                      val i = usbIface
+                      if (c != null && i != null) c.releaseInterface(i)
+                      c?.close()
+                  } catch (e: Exception) { }
+                  usbConn = null
+                  usbOut = null
+                  usbIface = null
+                  usbMode = 0
+                  usbName = ""
+              }
+
+              @Synchronized
+              private fun openUsb(um: UsbManager, dev: UsbDevice, kind: Int) {
+                  for (i in 0 until dev.interfaceCount) {
+                      val itf = dev.getInterface(i)
+                      if (!isCtl(itf, kind)) continue
+                      var out: UsbEndpoint? = null
+                      for (e in 0 until itf.endpointCount) {
+                          val ep = itf.getEndpoint(e)
+                          if (ep.direction == UsbConstants.USB_DIR_OUT &&
+                              (ep.type == UsbConstants.USB_ENDPOINT_XFER_INT || ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK)) {
+                              out = ep
+                              break
+                          }
                       }
-                      return best
+                      if (out == null) continue
+                      val c = um.openDevice(dev) ?: continue
+                      if (!c.claimInterface(itf, true)) { c.close(); continue }
+                      usbIface = itf
+                      usbOut = out
+                      usbMode = kind
+                      usbName = dev.deviceName
+                      usbConn = c
+                      if (kind == 2) {
+                          c.bulkTransfer(out, byteArrayOf(0x05, 0x20, 0x00, 0x01, 0x00), 5, 100)
+                      }
+                      return
                   }
+              }
 
-                  private fun amp(v: Double): Int {
-                      val a = Math.round(v * 255.0).toInt()
-                      return if (a < 1) 0 else if (a > 255) 255 else a
+              private fun scanUsb() {
+                  val um = getSystemService(Context.USB_SERVICE) as UsbManager
+                  if (usbConn != null) {
+                      val still = um.deviceList.values.any { it.deviceName == usbName }
+                      if (still) return
+                      closeUsb()
                   }
+                  for (dev in um.deviceList.values) {
+                      val kind = usbKind(dev)
+                      if (kind == 0) continue
+                      if (!um.hasPermission(dev)) {
+                          if (asked.add(dev.deviceName)) {
+                              val pi = PendingIntent.getBroadcast(
+                                  this, 0, Intent(actionUsb).setPackage(packageName), PendingIntent.FLAG_MUTABLE
+                              )
+                              um.requestPermission(dev, pi)
+                          }
+                          continue
+                      }
+                      openUsb(um, dev, kind)
+                      if (usbConn != null) return
+                  }
+              }
+
+              @Synchronized
+              private fun sendUsb(s: Int, w: Int): Boolean {
+                  val c = usbConn ?: return false
+                  val ep = usbOut ?: return false
+                  val pkt: ByteArray
+                  if (usbMode == 1) {
+                      pkt = byteArrayOf(0x00, 0x08, 0x00, s.toByte(), w.toByte(), 0x00, 0x00, 0x00)
+                  } else {
+                      xoneSeq = (xoneSeq + 1) and 0xFF
+                      pkt = byteArrayOf(
+                          0x09, 0x00, xoneSeq.toByte(), 0x09, 0x00, 0x0F, 0x00, 0x00,
+                          (s * 100 / 255).toByte(), (w * 100 / 255).toByte(), 0xFF.toByte(), 0x00, 0xEB.toByte()
+                      )
+                  }
+                  val r = c.bulkTransfer(ep, pkt, pkt.size, 50)
+                  return r >= 0
+              }
+
+              private fun playUsb(s: Int, w: Int, dur: Long) {
+                  sendUsb(s, w)
+                  main.removeCallbacks(stopUsb)
+                  if (s > 0 || w > 0) main.postDelayed(stopUsb, dur)
+              }
+
+              // ───────────── diagnostics text ─────────────
+
+              private fun buildInfo(): String {
+                  val sb = StringBuilder()
+                  sb.append("NATIVE DIAG (tap to hide)  sdk=").append(Build.VERSION.SDK_INT).append('\n')
+                  sb.append("Input devices:\n")
+                  for (id in InputDevice.getDeviceIds()) {
+                      val d = InputDevice.getDevice(id) ?: continue
+                      val m = try { motorIds(d).size } catch (e: Exception) { -1 }
+                      sb.append(" [").append(id).append("] ").append(d.name)
+                          .append(" vid=").append(Integer.toHexString(d.vendorId))
+                          .append(" pid=").append(Integer.toHexString(d.productId))
+                          .append(" src=0x").append(Integer.toHexString(d.sources))
+                          .append(" motors=").append(m).append('\n')
+                  }
+                  val um = getSystemService(Context.USB_SERVICE) as UsbManager
+                  sb.append("USB devices: ").append(um.deviceList.size).append('\n')
+                  for (dev in um.deviceList.values) {
+                      sb.append(" ").append(dev.deviceName)
+                          .append(" vid=").append(Integer.toHexString(dev.vendorId))
+                          .append(" pid=").append(Integer.toHexString(dev.productId))
+                          .append(" kind=").append(usbKind(dev))
+                          .append(" perm=").append(um.hasPermission(dev)).append('\n')
+                  }
+                  sb.append("USB rumble open: ").append(usbConn != null).append('\n')
+                  val p = findPad()
+                  sb.append("Input motor in use: ").append(if (p != null) p.name else "none")
+                  return sb.toString()
+              }
+
+              // ───────────── JS bridge (same names as before, index.html unchanged) ─────────────
+
+              inner class Bridge {
+                  @JavascriptInterface
+                  fun available(): Boolean = findPad() != null || usbConn != null
 
                   @JavascriptInterface
-                  fun available(): Boolean = findPad() != null
-
-                  @JavascriptInterface
-                  fun info(): String {
-                      val d = findPad() ?: return "no vibrating pad found"
-                      return d.name
-                  }
+                  fun info(): String = try { buildInfo() } catch (e: Exception) { "diag error: " + e.message }
 
                   @JavascriptInterface
                   fun play(strong: Double, weak: Double, ms: Int) {
-                      val d = findPad() ?: return
-                      val dur = if (ms < 10) 10L else ms.toLong()
                       val s = amp(strong)
                       val w = amp(weak)
-                      try {
-                          if (Build.VERSION.SDK_INT >= 31) {
-                              val vm = d.vibratorManager
-                              val ids = vm.vibratorIds
-                              if (s == 0 && w == 0) { vm.cancel(); return }
-                              if (ids.size >= 2) {
-                                  val b = CombinedVibration.startParallel()
-                                  if (s > 0) b.addVibrator(ids[0], VibrationEffect.createOneShot(dur, s))
-                                  if (w > 0) b.addVibrator(ids[1], VibrationEffect.createOneShot(dur, w))
-                                  vm.vibrate(b.combine())
-                              } else {
-                                  val m = if (s > w) s else w
-                                  vm.vibrate(CombinedVibration.createParallel(VibrationEffect.createOneShot(dur, m)))
-                              }
-                          } else {
-                              val m = if (s > w) s else w
-                              if (m == 0) { d.vibrator.cancel(); return }
-                              d.vibrator.vibrate(VibrationEffect.createOneShot(dur, m))
-                          }
-                      } catch (e: Exception) {
-                          // ignore
+                      val dur = (if (ms < 10) 10 else ms).toLong()
+                      val d = findPad()
+                      if (d != null) {
+                          playInput(d, s, w, dur)
+                      } else if (usbConn != null) {
+                          playUsb(s, w, dur)
                       }
                   }
               }
