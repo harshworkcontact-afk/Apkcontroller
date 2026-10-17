@@ -1,0 +1,217 @@
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Generate Android project
+        run: |
+          set -e
+          mkdir -p $(dirname settings.gradle)
+          cat > settings.gradle <<'EOF_FILE'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "VibeController"
+          include ':app'
+          EOF_FILE
+          mkdir -p $(dirname build.gradle)
+          cat > build.gradle <<'EOF_FILE'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+              id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
+          }
+          EOF_FILE
+          mkdir -p $(dirname gradle.properties)
+          cat > gradle.properties <<'EOF_FILE'
+          org.gradle.jvmargs=-Xmx2g
+          android.useAndroidX=false
+          EOF_FILE
+          mkdir -p $(dirname app/build.gradle)
+          cat > app/build.gradle <<'EOF_FILE'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.gta.vibe'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.gta.vibe'
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
+          EOF_FILE
+          mkdir -p $(dirname app/src/main/AndroidManifest.xml)
+          cat > app/src/main/AndroidManifest.xml <<'EOF_FILE'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <application
+                  android:label="Vibe Controller"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+                  android:allowBackup="true">
+                  <activity android:name=".MainActivity" android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF_FILE
+          mkdir -p $(dirname app/src/main/java/com/gta/vibe/MainActivity.kt)
+          cat > app/src/main/java/com/gta/vibe/MainActivity.kt <<'EOF_FILE'
+          package com.gta.vibe
+
+          import android.app.Activity
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.CombinedVibration
+          import android.os.VibrationEffect
+          import android.view.InputDevice
+          import android.view.WindowManager
+          import android.webkit.JavascriptInterface
+          import android.webkit.WebChromeClient
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+
+          class MainActivity : Activity() {
+
+              private lateinit var web: WebView
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                  web = WebView(this)
+                  setContentView(web)
+                  web.settings.javaScriptEnabled = true
+                  web.settings.domStorageEnabled = true
+                  web.settings.allowFileAccess = true
+                  web.webChromeClient = WebChromeClient()
+                  web.webViewClient = WebViewClient()
+                  web.addJavascriptInterface(Bridge(), "AndroidRumble")
+                  web.loadUrl("file:///android_asset/index.html")
+              }
+
+              @Deprecated("Deprecated in Java")
+              override fun onBackPressed() {
+                  if (web.canGoBack()) web.goBack() else super.onBackPressed()
+              }
+
+              inner class Bridge {
+
+                  private fun hasVib(d: InputDevice): Boolean {
+                      return if (Build.VERSION.SDK_INT >= 31) {
+                          d.vibratorManager.vibratorIds.isNotEmpty()
+                      } else {
+                          d.vibrator.hasVibrator()
+                      }
+                  }
+
+                  private fun findPad(): InputDevice? {
+                      var best: InputDevice? = null
+                      var bestScore = Int.MIN_VALUE
+                      for (id in InputDevice.getDeviceIds()) {
+                          val d = InputDevice.getDevice(id) ?: continue
+                          val src = d.sources
+                          val isPad = (src and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
+                                  (src and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+                          if (!isPad) continue
+                          if (!hasVib(d)) continue
+                          var sc = 0
+                          val n = d.name.lowercase()
+                          if (n.contains("uinput") || n.contains("fortsense")) sc -= 100
+                          if (n.contains("xbox") || n.contains("xinput") || n.contains("wireless controller")) sc += 50
+                          if (sc > bestScore) { bestScore = sc; best = d }
+                      }
+                      return best
+                  }
+
+                  private fun amp(v: Double): Int {
+                      val a = Math.round(v * 255.0).toInt()
+                      return if (a < 1) 0 else if (a > 255) 255 else a
+                  }
+
+                  @JavascriptInterface
+                  fun available(): Boolean = findPad() != null
+
+                  @JavascriptInterface
+                  fun info(): String {
+                      val d = findPad() ?: return "no vibrating pad found"
+                      return d.name
+                  }
+
+                  @JavascriptInterface
+                  fun play(strong: Double, weak: Double, ms: Int) {
+                      val d = findPad() ?: return
+                      val dur = if (ms < 10) 10L else ms.toLong()
+                      val s = amp(strong)
+                      val w = amp(weak)
+                      try {
+                          if (Build.VERSION.SDK_INT >= 31) {
+                              val vm = d.vibratorManager
+                              val ids = vm.vibratorIds
+                              if (s == 0 && w == 0) { vm.cancel(); return }
+                              if (ids.size >= 2) {
+                                  val b = CombinedVibration.startParallel()
+                                  if (s > 0) b.addVibrator(ids[0], VibrationEffect.createOneShot(dur, s))
+                                  if (w > 0) b.addVibrator(ids[1], VibrationEffect.createOneShot(dur, w))
+                                  vm.vibrate(b.combine())
+                              } else {
+                                  val m = if (s > w) s else w
+                                  vm.vibrate(CombinedVibration.createParallel(VibrationEffect.createOneShot(dur, m)))
+                              }
+                          } else {
+                              val m = if (s > w) s else w
+                              if (m == 0) { d.vibrator.cancel(); return }
+                              d.vibrator.vibrate(VibrationEffect.createOneShot(dur, m))
+                          }
+                      } catch (e: Exception) {
+                          // ignore
+                      }
+                  }
+              }
+          }
+          EOF_FILE
+          mkdir -p app/src/main/assets
+          cp index.html app/src/main/assets/index.html
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vibe-controller-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
