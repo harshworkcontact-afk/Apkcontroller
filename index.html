@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Controller Setup</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Sora:wght@300;400;600;700&display=swap');
+
+:root {
+  --app-bg: #0d1117;
+  --card: #161b22;
+  --border: rgba(255,255,255,0.08);
+  --border-mid: rgba(255,255,255,0.15);
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --hint: #484f58;
+  --accent: #1D9E75;
+  --accent-light: rgba(29,158,117,0.12);
+  --accent-dark: #0F6E56;
+  --danger: #D85A30;
+  --danger-light: rgba(216,90,48,0.12);
+  --r-md: 10px;
+  --r-lg: 16px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Sora', system-ui, sans-serif;
+  background: var(--app-bg);
+  color: var(--text);
+  padding: 0 0 2rem;
+  min-height: 100vh;
+}
+
+.app-header {
+  padding: 1.5rem 2rem 1rem;
+  border-bottom: 0.5px solid var(--border);
+  margin-bottom: 1.5rem;
+}
+
+.app-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: #D85A30;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+.status-dot.connected { background: var(--accent); }
+.status-dot.running { background: var(--accent); animation: pulse-dot 1s infinite; }
+
+@keyframes pulse-dot {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.4); }
+}
+
+.status-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 5px;
+}
+
+.page-wrap {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.card {
+  background: var(--card);
+  border: 0.5px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 1.1rem 1.4rem;
+  margin-bottom: 14px;
+}
+
+.card-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+
+label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+select {
+  width: 100%;
+  font-family: 'Sora', system-ui, sans-serif;
+  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 0.5px solid var(--border-mid);
+  background: var(--app-bg);
+  color: var(--text);
+  outline: none;
+  cursor: pointer;
+}
+
+select:focus { border-color: var(--accent); }
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.slider-row label {
+  width: 140px;
+  flex-shrink: 0;
+  margin: 0;
+  font-size: 13px;
+}
+
+.slider-row input[type="range"] { flex: 1; }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 38px;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: var(--app-bg);
+  border-radius: 2px;
+  border: 0.5px solid var(--border-mid);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-top: -9px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  border: 2px solid var(--app-bg);
+}
+
+.slider-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  min-width: 48px;
+  text-align: right;
+}
+
+/* MOTOR BARS */
+.motor-bars {
+  display: flex;
+  gap: 14px;
+  align-items: flex-end;
+  height: 56px;
+  margin-bottom: 16px;
+}
+
+.motor-bar-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.motor-bar-bg {
+  width: 100%;
+  height: 42px;
+  background: var(--app-bg);
+  border-radius: 5px;
+  overflow: hidden;
+  position: relative;
+  border: 0.5px solid var(--border-mid);
+}
+
+.motor-bar-fill {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: var(--accent);
+  border-radius: 5px;
+  transition: height 0.07s ease;
+  height: 0%;
+}
+
+.motor-bar-fill.right { background: #388bfd; }
+
+.motor-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+/* MODE GRID */
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 9px;
+  margin-bottom: 4px;
+}
+
+.mode-btn {
+  background: var(--app-bg);
+  border: 0.5px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 11px 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.mode-btn:hover { border-color: var(--border-mid); }
+.mode-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+.mode-btn .mode-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  display: block;
+  margin-bottom: 2px;
+}
+
+.mode-btn.active .mode-name { color: var(--accent); }
+
+.mode-btn .mode-desc {
+  font-size: 11px;
+  color: var(--hint);
+  display: block;
+  line-height: 1.3;
+  margin-bottom: 4px;
+}
+
+.mode-btn .mode-dur {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--accent);
+  display: block;
+}
+
+/* ACTION */
+.action-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.btn-start {
+  flex: 2;
+  padding: 14px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--r-lg);
+  font-family: 'Sora', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-start:hover { background: var(--accent-dark); }
+.btn-start:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-stop {
+  flex: 1;
+  padding: 14px;
+  background: var(--danger-light);
+  color: var(--danger);
+  border: 0.5px solid var(--danger);
+  border-radius: var(--r-lg);
+  font-family: 'Sora', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-stop:hover { background: var(--danger); color: white; }
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 0;
+  border-bottom: 0.5px solid var(--border);
+}
+.toggle-row:last-child { border-bottom: none; }
+.toggle-label { font-size: 14px; color: var(--text); }
+.toggle-sub { font-size: 12px; color: var(--hint); margin-top: 2px; }
+
+.toggle {
+  width: 42px; height: 24px;
+  border-radius: 999px;
+  background: var(--app-bg);
+  border: 0.5px solid var(--border-mid);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.toggle.on { background: var(--accent); border-color: var(--accent); }
+.toggle::after {
+  content: '';
+  position: absolute;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: white;
+  top: 2px; left: 2px;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.toggle.on::after { transform: translateX(18px); }
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+.timer-display {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+  padding: 12px;
+  border-radius: var(--r-md);
+  background: var(--app-bg);
+  margin-top: 14px;
+  display: none;
+  letter-spacing: 2px;
+}
+
+.breath-display {
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--accent);
+  padding: 10px;
+  margin-top: 10px;
+  border-radius: var(--r-md);
+  background: var(--accent-light);
+  display: none;
+}
+
+.calibration-note {
+  font-size: 12px;
+  color: var(--hint);
+  line-height: 1.5;
+  padding: 9px 11px;
+  background: var(--app-bg);
+  border-radius: var(--r-md);
+  border-left: 2px solid var(--accent);
+  margin-top: 10px;
+}
+
+.btn-test {
+  padding: 9px 16px;
+  background: transparent;
+  color: var(--muted);
+  border: 0.5px solid var(--border-mid);
+  border-radius: var(--r-md);
+  font-family: 'Sora', sans-serif;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.12s;
+  margin-right: 6px;
+  margin-top: 10px;
+}
+.btn-test:hover { border-color: var(--accent); color: var(--accent); }
+
+#no-gamepad-msg {
+  text-align: center;
+  padding: 2.5rem 1rem;
+}
+#no-gamepad-msg .big-icon {
+  font-size: 52px;
+  margin-bottom: 14px;
+  display: block;
+}
+#no-gamepad-msg h2 { font-size: 20px; font-weight: 600; margin-bottom: 10px; }
+#no-gamepad-msg p {
+  font-size: 14px;
+  color: var(--muted);
+  max-width: 380px;
+  margin: 0 auto;
+  line-height: 1.65;
+}
+
+#main-ui { display: none; }
+
+.custom-panel { display: none; margin-top: 14px; }
+.custom-panel.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="app-header page-wrap">
+  <div class="app-title">
+    <span class="status-dot" id="statusDot"></span>
+    Controller Setup
+  </div>
+  <div class="status-text" id="statusText">Connect your EvoFox One S via USB, 2.4GHz dongle or Bluetooth — then press any button</div>
+</div>
+
+<div class="page-wrap">
+
+<div id="no-gamepad-msg">
+  <span class="big-icon">🎮</span>
+  <h2>No controller detected</h2>
+  <p>Plug in your EvoFox One S via USB or 2.4GHz receiver, then press any button on the controller to wake it up.<br><br>Make sure it's in <strong>X-Input mode</strong> — hold <strong>LB + Home</strong> for 2 seconds until the LED turns purple.</p>
+  <p id="diag" style="margin-top:16px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--hint);white-space:pre-line;"></p>
+</div>
+
+<div id="main-ui">
+
+  <!-- MOTOR STATUS -->
+  <div class="card">
+    <div class="card-title">🎮 Controller & Motor Status</div>
+    <div style="margin-bottom:14px;">
+      <label>Controller (auto-picks the Xbox one)</label>
+      <select id="padSel" onchange="setPad(this.value)"><option value="">Auto</option></select>
+    </div>
+    <div class="grid2">
+      <div>
+        <div class="motor-bars">
+          <div class="motor-bar-wrap">
+            <div class="motor-bar-bg">
+              <div class="motor-bar-fill" id="barLeft"></div>
+            </div>
+            <span class="motor-label">LEFT (heavy)</span>
+          </div>
+          <div class="motor-bar-wrap">
+            <div class="motor-bar-bg">
+              <div class="motor-bar-fill right" id="barRight"></div>
+            </div>
+            <span class="motor-label">RIGHT (coin)</span>
+          </div>
+        </div>
+        <div>
+          <button class="btn-test" onclick="testMotor('left')">▶ Test Left</button>
+          <button class="btn-test" onclick="testMotor('right')">▶ Test Right</button>
+          <button class="btn-test" onclick="testMotor('both')">▶ Both</button>
+        </div>
+      </div>
+      <div>
+        <div class="slider-row" style="margin-bottom:10px;">
+          <label style="width:100px;">Left boost</label>
+          <input type="range" min="50" max="150" value="100" id="leftBoost" step="1"
+            oninput="document.getElementById('lbv').textContent=(this.value/100).toFixed(2)+'x'">
+          <span class="slider-val" id="lbv">1.00x</span>
+        </div>
+        <div class="slider-row">
+          <label style="width:100px;">Right boost</label>
+          <input type="range" min="80" max="200" value="150" id="rightBoost" step="1"
+            oninput="document.getElementById('rbv').textContent=(this.value/100).toFixed(2)+'x'">
+          <span class="slider-val" id="rbv">1.50x</span>
+        </div>
+        <div class="calibration-note">
+          EvoFox One S: right (coin) motor is weaker — right boost pre-set to 1.50x. Adjust until both motors feel equally strong.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SESSION MODE -->
+  <div class="card">
+    <div class="card-title">📋 Session Mode</div>
+    <div class="mode-grid" id="modeGrid"></div>
+    <div class="custom-panel" id="customPanel">
+      <div class="grid2">
+        <div>
+          <label>Rumble duration</label>
+          <div class="slider-row">
+            <input type="range" min="50" max="1000" step="25" value="200" id="custDur"
+              oninput="document.getElementById('cdv').textContent=this.value+'ms'">
+            <span class="slider-val" id="cdv">200ms</span>
+          </div>
+        </div>
+        <div>
+          <label>Pause between pulses</label>
+          <div class="slider-row">
+            <input type="range" min="50" max="2000" step="50" value="500" id="custPause"
+              oninput="document.getElementById('cpv').textContent=this.value+'ms'">
+            <span class="slider-val" id="cpv">500ms</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="card">
+    <div class="card-title">🎛️ Session Controls</div>
+    <div class="slider-row">
+      <label>Intensity</label>
+      <input type="range" min="10" max="100" step="1" value="80" id="intensity"
+        oninput="document.getElementById('intv').textContent=this.value+'%'">
+      <span class="slider-val" id="intv">80%</span>
+    </div>
+    <div class="slider-row">
+      <label>Rhythm speed</label>
+      <input type="range" min="200" max="2000" step="50" value="900" id="speed"
+        oninput="document.getElementById('spdv').textContent=this.value+'ms'">
+      <span class="slider-val" id="spdv">900ms</span>
+    </div>
+
+    <div style="margin-top:4px;">
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Async motors (L ≠ R)</div>
+          <div class="toggle-sub">Alternating wave between both motors</div>
+        </div>
+        <div class="toggle on" id="togAsync" onclick="toggleOpt('togAsync','async')"></div>
+      </div>
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Breathing guide (4-4-6)</div>
+          <div class="toggle-sub">Shows breath cues synced with session</div>
+        </div>
+        <div class="toggle on" id="togBreath" onclick="toggleOpt('togBreath','breath')"></div>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <button class="btn-start" id="startBtn" onclick="startSession()">▶ Start Session</button>
+      <button class="btn-stop" onclick="stopAll()">■ Stop</button>
+    </div>
+
+    <div class="timer-display" id="timerDisplay">00:00</div>
+    <div class="breath-display" id="breathDisplay"></div>
+  </div>
+
+  <!-- DIAGNOSTICS -->
+  <div class="card">
+    <div class="card-title">🔍 Diagnostics</div>
+    <pre id="diagBox" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);white-space:pre-wrap;word-break:break-all;line-height:1.6;"></pre>
+  </div>
+
+</div><!-- /main-ui -->
+</div><!-- /page-wrap -->
+
+<script>
+const MODES = [
+  {id:'warmup',     name:'Warm-Up',        desc:'Gentle build-in',      dur:'5 min', mins:5},
+  {id:'energywave', name:'Energy Wave',    desc:'Smooth sine flow',     dur:'∞',     mins:0},
+  {id:'kundalini',  name:'Kundalini Rise', desc:'Spinal energy spiral', dur:'∞',     mins:0},
+  {id:'nipplesuck', name:'Nipple Suck',    desc:'Suck-pulse rhythm',    dur:'∞',     mins:0},
+  {id:'breathsync', name:'Breath Sync',    desc:'14s breath cycle',     dur:'∞',     mins:0},
+  {id:'slowripple', name:'Slow Ripple',    desc:'Ultra-slow undulation',dur:'∞',     mins:0},
+  {id:'microburst', name:'MicroBurst',     desc:'Staccato tease bursts',dur:'∞',     mins:0},
+  {id:'deepthrob',  name:'Deep Throb',     desc:'Heavy long pulses',    dur:'∞',     mins:0},
+  {id:'orgasm10',   name:'10-min Build',   desc:'Ramp to climax',       dur:'10 min',mins:10},
+  {id:'orgasm20',   name:'20-min Tantric', desc:'Full tantric arc',     dur:'20 min',mins:20},
+  {id:'edge30',     name:'30-min Edge',    desc:'Edge and explode',     dur:'30 min',mins:30},
+  {id:'randomfire', name:'Random Fire',    desc:'Auto-switches pattern',dur:'∞',     mins:0},
+  {id:'custom',     name:'Custom',         desc:'Your own timing',      dur:'∞',     mins:0},
+];
+
+let gp = null;
+let running = false;
+let timers = new Set();
+let endTimer = null;
+let bPhase = 0;
+let selMode = 'orgasm20';
+let opts = {async:true, breath:true};
+let curL = 0, curR = 0;
+
+const gi = id => document.getElementById(id);
+function getInt(){ return parseInt(gi('intensity').value)/100 }
+function getSpd(){ return parseInt(gi('speed').value) }
+function getLB(){  return parseInt(gi('leftBoost').value)/100 }
+function getRB(){  return parseInt(gi('rightBoost').value)/100 }
+function clamp(x){ return Math.max(0,Math.min(1,x)) }
+
+function toggleOpt(id,key){
+  opts[key]=!opts[key];
+  gi(id).classList.toggle('on',opts[key]);
+}
+
+// ── GAMEPAD DETECTION ─────────────────────────────────
+// Gamepad objects are SNAPSHOTS in Chrome/Android: always re-read navigator.getGamepads().
+function getPads(){
+  try{
+    const list = navigator.getGamepads ? navigator.getGamepads()
+               : (navigator.webkitGetGamepads ? navigator.webkitGetGamepads() : []);
+    return Array.from(list||[]).filter(p=>p && p.connected!==false);
+  }catch(e){ return []; }
+}
+function nativeRumble(){
+  try{ return !!(window.AndroidRumble && window.AndroidRumble.available()); }catch(e){ return false; }
+}
+function hasRumble(p){
+  if(p && nativeRumble()) return true;   // Android app: rumble goes through native code
+  return !!(p && (p.vibrationActuator || (p.hapticActuators && p.hapticActuators.length)));
+}
+let forcedIndex=null;   // set when you choose a controller manually
+function padScore(p){
+  let sc=0;
+  if(/uinput|fortsense/i.test(p.id)) sc-=100;                       // virtual/dummy device
+  if(/xbox|xinput|x-input|wireless controller/i.test(p.id)) sc+=50; // real Xbox-style pad
+  if(hasRumble(p)) sc+=25;
+  if(p.mapping==='standard') sc+=5;
+  return sc;
+}
+function pickPad(){
+  const pads=getPads();
+  if(forcedIndex!==null){
+    const f=pads.find(p=>p.index===forcedIndex);
+    if(f) return f;
+  }
+  return pads.slice().sort((a,b)=>padScore(b)-padScore(a))[0] || null;
+}
+function setPad(v){
+  forcedIndex = (v===''||v==null) ? null : parseInt(v);
+  lastPadKey='';
+  if(running) stopAll();
+  updateStatus();
+}
+function freshPad(){
+  const p=pickPad();
+  if(p) gp=p;
+  return p;
+}
+function diagText(prefix){
+  const api = !!(navigator.getGamepads || navigator.webkitGetGamepads);
+  const bits=[];
+  bits.push('API: '+(api?'yes':'NO'));
+  bits.push('secure: '+(window.isSecureContext?'yes':'NO'));
+  bits.push('pads: '+getPads().length);
+  bits.push('page: '+location.protocol);
+  let msg=prefix+'  ['+bits.join(' · ')+']';
+  if(!api) msg+='\nThis browser/page has no Gamepad API. Open the file in Chrome (not an in-app viewer).';
+  else if(!window.isSecureContext) msg+='\nThis page is not a secure context, so Chrome hides gamepads. Open it from https:// (e.g. GitHub Pages / Netlify) or localhost.';
+  return msg;
+}
+
+let lastPadKey='';
+function updateStatus(){
+  const pad=freshPad();
+  if(!pad){
+    if(gp){ gp=null; if(running) stopAll(); }
+    gi('no-gamepad-msg').style.display='block';
+    gi('main-ui').style.display='none';
+    gi('statusDot').className='status-dot';
+    gi('statusText').textContent='No controller — press any button on it';
+    const d=gi('diag'); if(d) d.textContent=diagText('Waiting for controller…');
+    lastPadKey='';
+    return;
+  }
+  gi('no-gamepad-msg').style.display='none';
+  gi('main-ui').style.display='block';
+  if(!running){
+    const name=pad.id?pad.id.substring(0,55):'Gamepad';
+    const key=pad.index+'|'+pad.id+'|'+hasRumble(pad);
+    if(key!==lastPadKey){
+      lastPadKey=key;
+      gi('statusDot').className='status-dot connected';
+      gi('statusText').textContent = hasRumble(pad)
+        ? '✓ '+name+' — Ready'
+        : '⚠ '+name+' — detected, but no vibration exposed';
+    }
+  }
+}
+
+window.addEventListener('gamepadconnected', ()=>{ updateStatus(); });
+
+window.addEventListener('gamepaddisconnected', ()=>{
+  updateStatus();
+  if(!gp){
+    stopAll();
+    gi('statusText').textContent='Controller disconnected';
+  }
+});
+
+// Wake-up: Android Chrome only exposes the pad after a button press / user gesture
+['touchstart','mousedown','keydown','click'].forEach(ev=>
+  window.addEventListener(ev, updateStatus, {passive:true}));
+
+// Fast polling (the Gamepad API is poll-based, like the tester sites)
+setInterval(updateStatus, 250);
+(function rafPoll(){ updateStatus(); requestAnimationFrame(rafPoll); })();
+
+// ── RUMBLE CORE ───────────────────────────────────────
+function rumble(strong, weak, dur){
+  const p=freshPad();
+  if(!p) return;
+  if(nativeRumble()){
+    try{ window.AndroidRumble.play(strong,weak,Math.max(10,Math.floor(dur))); }catch(e){}
+    return;
+  }
+  const va=p.vibrationActuator;
+  if(va && typeof va.playEffect==='function'){
+    va.playEffect('dual-rumble',{
+      startDelay:0,
+      duration:dur,
+      strongMagnitude:strong,
+      weakMagnitude:weak
+    }).catch(()=>{});
+    return;
+  }
+  // Fallback for older Android Chrome builds (hapticActuators)
+  const ha=p.hapticActuators && p.hapticActuators[0];
+  if(ha && typeof ha.pulse==='function'){
+    ha.pulse(Math.max(strong,weak),dur).catch(()=>{});
+  }
+}
+
+// ── VIBRATE ───────────────────────────────────────────
+function vibrate(lMag, rMag, dur){
+  if(!hasRumble(freshPad())) return;
+  const L = clamp(lMag * getLB());
+  const R = clamp(rMag * getRB());
+  curL=L; curR=R;
+  rumble(L,R,Math.max(10,Math.floor(dur||0)));
+}
+
+function vibrateSync(mag,dur){ vibrate(mag,mag,dur); }
+
+// ── MOTOR BARS ────────────────────────────────────────
+(function animBars(){
+  gi('barLeft').style.height=Math.round(curL*100)+'%';
+  gi('barRight').style.height=Math.round(curR*100)+'%';
+  requestAnimationFrame(animBars);
+})();
+
+// ── SCHEDULER ─────────────────────────────────────────
+function schedule(fn,delay){
+  const id=setTimeout(()=>{timers.delete(id);if(running)fn();},delay);
+  timers.add(id); return id;
+}
+
+// ── STOP ──────────────────────────────────────────────
+function stopAll(){
+  running=false;
+  timers.forEach(clearTimeout); timers.clear();
+  if(endTimer){clearTimeout(endTimer);endTimer=null;}
+  rumble(0,0,1);
+  curL=0;curR=0;
+  gi('timerDisplay').style.display='none';
+  gi('breathDisplay').style.display='none';
+  gi('startBtn').disabled=false;
+  gi('statusDot').className='status-dot connected';
+  if(gp) gi('statusText').textContent='Session stopped — Ready';
+}
+
+// ── TIMER ─────────────────────────────────────────────
+function startTimer(endAt){
+  const tick=()=>{
+    if(!running) return;
+    const left=Math.max(0,Math.ceil((endAt-Date.now())/1000));
+    if(left<=0){stopAll();return;}
+    const m=Math.floor(left/60),s=left%60;
+    gi('timerDisplay').textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    schedule(tick,500);
+  };
+  gi('timerDisplay').style.display='block'; tick();
+}
+
+// ── BREATH ────────────────────────────────────────────
+function startBreath(){
+  const TXT=['INHALE deeply – pull energy UP spine','HOLD – feel heat in chest','EXHALE slowly – push wave to pelvis','PAUSE – let it bounce back up'];
+  const MS=[4000,4000,6000,2000];
+  const cycle=()=>{
+    if(!running||!opts.breath){gi('breathDisplay').style.display='none';return;}
+    gi('breathDisplay').style.display='block';
+    gi('breathDisplay').textContent=TXT[bPhase];
+    const wait=MS[bPhase];
+    bPhase=(bPhase+1)%4;
+    schedule(cycle,wait);
+  };
+  cycle();
+}
+
+// ── TEST MOTORS ───────────────────────────────────────
+function testMotor(which){
+  if(!hasRumble(freshPad())){alert('No gamepad vibration available.');return;}
+  const dur=700;
+  if(which==='left'){
+    curL=clamp(getLB());curR=0;
+    rumble(clamp(getLB()),0,dur);
+  } else if(which==='right'){
+    curL=0;curR=clamp(getRB());
+    rumble(0,clamp(getRB()),dur);
+  } else {
+    curL=clamp(getLB());curR=clamp(getRB());
+    rumble(clamp(getLB()),clamp(getRB()),dur);
+  }
+  setTimeout(()=>{curL=0;curR=0;},dur+100);
+}
+
+// ── MODES ─────────────────────────────────────────────
+const runners = {
+  warmup(){
+    const loop=()=>{
+      if(!running)return;
+      vibrateSync(getInt()*0.6,300);
+      schedule(loop,800+Math.random()*600);
+    };loop();
+  },
+
+  energywave(){
+    let t=0;
+    const loop=()=>{
+      if(!running)return;
+      const base=getInt();
+      const wave=0.5+0.5*Math.sin(t*0.08);
+      if(opts.async){ vibrate(base*wave,base*(0.5+0.5*Math.sin(t*0.08+Math.PI*0.65)),120); }
+      else { vibrateSync(base*wave,120); }
+      t++; schedule(loop,120);
+    };loop();
+  },
+
+  kundalini(){
+    const loop=()=>{
+      if(!running)return;
+      const b=getInt();
+      if(opts.async){
+        vibrate(b*1.0,b*0.5,180);
+        schedule(()=>{if(running)vibrate(b*0.4,b*1.0,220);},200);
+      } else {
+        vibrateSync(b,180);
+        schedule(()=>{if(running)vibrateSync(b*0.6,220);},200);
+      }
+      schedule(loop,getSpd()+Math.random()*800);
+    };loop();
+  },
+
+  nipplesuck(){
+    const loop=()=>{
+      if(!running)return;
+      const n=4+Math.floor(Math.random()*4);
+      let i=0;
+      const pulse=()=>{
+        if(!running||i>=n){schedule(loop,800+Math.random()*1200);return;}
+        const env=Math.sin(Math.PI*i/n);
+        const b=getInt();
+        if(opts.async){ vibrate(b*(0.5+0.5*env),b*(0.3+0.7*(1-env*0.4)),100); }
+        else { vibrateSync(b*(0.5+0.5*env),100); }
+        i++; schedule(pulse,145);
+      };pulse();
+    };loop();
+  },
+
+  breathsync(){
+    const loop=()=>{
+      if(!running)return;
+      const phase=(Date.now()%14000)/14000;
+      const b=getInt();
+      let lm,rm;
+      if(phase<0.28){lm=b*0.45;rm=b*0.4;}
+      else if(phase<0.57){lm=b;rm=b*0.95;}
+      else{lm=b*0.65;rm=b*0.6;}
+      vibrate(lm,rm,200); schedule(loop,200);
+    };loop();
+  },
+
+  slowripple(){
+    let t=0;
+    const loop=()=>{
+      if(!running)return;
+      const ripL=0.25+0.75*(0.5+0.5*Math.sin(t*0.002));
+      const ripR=opts.async?(0.25+0.75*(0.5+0.5*Math.sin(t*0.002+1.3))):ripL;
+      vibrate(getInt()*ripL,getInt()*ripR,450);
+      t+=450; schedule(loop,450);
+    };loop();
+  },
+
+  microburst(){
+    const loop=()=>{
+      if(!running)return;
+      const burst=Math.random()<0.45;
+      const b=getInt();
+      if(opts.async){
+        vibrate(burst?b:b*0.1, burst?(Math.random()<0.5?b:b*0.3):b*0.08, 65);
+      } else {
+        vibrateSync(burst?b:b*0.1,65);
+      }
+      schedule(loop,300+Math.random()*900);
+    };loop();
+  },
+
+  deepthrob(){
+    const loop=()=>{
+      if(!running)return;
+      const b=getInt();
+      const throb=0.7+0.3*Math.sin(Date.now()*0.0011);
+      vibrate(b*throb,b*throb*0.88,700);
+      schedule(()=>{if(running)vibrate(b*0.28,b*0.22,200);},750);
+      schedule(loop,1500+Math.random()*600);
+    };loop();
+  },
+
+  randomfire(){
+    const pool=['energywave','kundalini','nipplesuck','breathsync','slowripple','deepthrob'];
+    let last='';
+    const sw=()=>{
+      if(!running)return;
+      let next;
+      do{next=pool[Math.floor(Math.random()*pool.length)];}while(next===last);
+      last=next; runners[next]();
+      schedule(sw,60000+Math.random()*90000);
+    };sw();
+  },
+
+  custom(){
+    const dur=parseInt(gi('custDur').value);
+    const pause=parseInt(gi('custPause').value);
+    const loop=()=>{
+      if(!running)return;
+      vibrate(getInt(),getInt()*0.9,dur);
+      schedule(loop,dur+pause);
+    };loop();
+  },
+
+  orgasm10(){ buildUp(10); },
+  orgasm20(){ buildUp(20); },
+  edge30()  { buildUp(30); },
+};
+
+function buildUp(minutes){
+  const st=Date.now(),total=minutes*60*1000;
+  const et=st+total,bEnd=st+total*0.35;
+  startTimer(et);
+  endTimer=setTimeout(stopAll,total);
+  const buildLoop=()=>{
+    if(!running||Date.now()>bEnd){mixLoop();return;}
+    const prog=(Date.now()-st)/(bEnd-st);
+    const mag=0.1+prog*0.9,b=getInt();
+    if(opts.async){
+      vibrate(b*mag,b*mag*0.85,50);
+      schedule(()=>{if(running)vibrate(b*mag*0.55,b*mag*0.75,40);},60);
+    } else { vibrateSync(b*mag,50); }
+    schedule(buildLoop,280+Math.round(90*(1-prog))+Math.random()*140);
+  };
+  const pool=['kundalini','nipplesuck','energywave','breathsync','slowripple','deepthrob'];
+  const mixLoop=()=>{
+    if(!running||Date.now()>et)return;
+    runners[pool[Math.floor(Math.random()*pool.length)]]();
+    schedule(mixLoop,8000+Math.random()*14000);
+  };
+  buildLoop();
+}
+
+// ── START ─────────────────────────────────────────────
+function startSession(){
+  const pad=freshPad();
+  if(!pad){alert('No controller detected!');return;}
+  if(!hasRumble(pad)){
+    alert('Controller found but no vibration support.\nMake sure EvoFox is in X-Input mode:\nHold LB + Home 2 sec → purple LED');return;
+  }
+  stopAll(); running=true; bPhase=0;
+  gi('startBtn').disabled=true;
+  gi('statusDot').className='status-dot running';
+  gi('statusText').textContent='▶ '+MODES.find(m=>m.id===selMode)?.name+' running...';
+  if(opts.breath) startBreath();
+  runners[selMode]?.();
+  const meta=MODES.find(m=>m.id===selMode);
+  if(meta?.mins>0&&!['orgasm10','orgasm20','edge30'].includes(selMode)){
+    startTimer(Date.now()+meta.mins*60000);
+    endTimer=setTimeout(stopAll,meta.mins*60000);
+  }
+}
+
+// ── BUILD MODE LIST ───────────────────────────────────
+(function buildModes(){
+  const grid=gi('modeGrid');
+  MODES.forEach(m=>{
+    const btn=document.createElement('div');
+    btn.className='mode-btn'+(m.id===selMode?' active':'');
+    btn.innerHTML=`<span class="mode-name">${m.name}</span><span class="mode-desc">${m.desc}</span><span class="mode-dur">${m.dur}</span>`;
+    btn.onclick=()=>{
+      selMode=m.id;
+      document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      gi('customPanel').className='custom-panel'+(m.id==='custom'?' show':'');
+    };
+    grid.appendChild(btn);
+  });
+})();
+// ── DIAGNOSTICS ───────────────────────────────────────
+let padSig='';
+setInterval(()=>{
+  const pads=getPads();
+  const sig=pads.map(p=>p.index+p.id+hasRumble(p)).join('|')+'|'+forcedIndex;
+  const sel=gi('padSel');
+  if(sel && sig!==padSig){
+    padSig=sig;
+    sel.innerHTML='<option value="">Auto</option>'+pads.map(p=>
+      `<option value="${p.index}">${p.index}: ${p.id.substring(0,38)}${hasRumble(p)?' ✓vib':''}</option>`).join('');
+    sel.value = forcedIndex===null ? '' : String(forcedIndex);
+  }
+  const box=gi('diagBox'); if(!box) return;
+  const p=freshPad();
+  if(!p){box.textContent='No pad'; return;}
+  const va=p.vibrationActuator;
+  box.textContent=[
+    'ALL PADS:',
+    ...pads.map(q=>'  ['+q.index+'] '+q.id+' | vib:'+(hasRumble(q)?'YES':'no')),
+    '',
+    'USING: ['+p.index+'] '+p.id,
+    'mapping: '+(p.mapping||'(none)'),
+    'secure context: '+window.isSecureContext,
+    'native rumble (APK): '+(nativeRumble()?'YES':'no'),
+    'vibrationActuator: '+(va?'YES':'NO'),
+    'effects: '+(va&&va.effects?Array.from(va.effects).join(','):'-'),
+    'hapticActuators: '+(p.hapticActuators?p.hapticActuators.length:'n/a'),
+    'buttons: '+p.buttons.length+'  axes: '+p.axes.length
+  ].join('\n');
+},500);
+</script>
+</body>
+</html>
